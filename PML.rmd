@@ -2,7 +2,7 @@
 output: html_document
 ---
 
-# Practical Machine Learning - Excercise Prediction
+# Practical Machine Learning - Exercise Prediction
 
 ## Executive Summary
 
