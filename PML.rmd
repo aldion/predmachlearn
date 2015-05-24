@@ -1,0 +1,138 @@
+---
+output: html_document
+---
+
+# Practical Machine Learning - Excercise Prediction
+
+## Executive Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+The goal of this project is use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. We explain how we processed the data and built a practical machine learning model achieving high prediction rate.
+
+## Data processing and Analysis
+
+```{r warning=FALSE, message=FALSE}
+library(ggplot2)
+library(randomForest)
+library(caret)
+set.seed(100)
+```
+
+The training data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+Download the training and testing data files (use local file when present):
+```{r}
+if (!file.exists("./pml-training.csv"))
+    download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+        destfile = "./pml-training.csv")
+
+if (!file.exists("./pml-testing.csv")) 
+    download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+        destfile = "./pml-testing.csv")
+```
+
+Read the training and test set into memory (we'll only use the test set after validating our model):
+```{r}
+training.data <- read.csv("./pml-training.csv", 
+                          header=TRUE, na.strings=c("NA",""), strip.white=TRUE)
+testing.data <- read.csv("./pml-testing.csv", 
+                         header=TRUE, na.strings=c("NA",""), strip.white=TRUE)
+```
+
+The raw training data has nearly 20000 rows and 160 variables.
+```{r}
+dim(training.data)
+```
+
+But many have incomplete values:
+```{r}
+sum(complete.cases(training.data))
+```
+
+Reduce the number of variable by eliminating the more obvious unrelated variables: 
+```{r}
+extracolumns = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 
+                 'cvtd_timestamp', 'new_window', 'num_window')
+training.data <- training.data[, -which(names(training.data) %in% extracolumns)]
+```
+
+By eliminating columns with incomplete data, we're keeping a more robust set with a much smaller number of variables: 
+```{r}
+nacolumns <- apply(training.data, 2, function(x) { sum(is.na(x)) })
+training.data <- subset(training.data[, which(nacolumns == 0)])
+dim(training.data)
+```
+
+
+## Create training and test sets for cross validation
+
+Partition the training set in two : 70% for model training and 30% for testing the model.
+```{r}
+trainIndex <- createDataPartition(y=training.data$classe, p=0.7, list=FALSE)
+training.train <- training.data[trainIndex,]
+training.test <- training.data[-trainIndex,]
+```
+
+
+# Model
+
+## Preprocessing
+
+We still have a fairly large number of variables, apply preprocessing with principal components analysis (PCA) to reduce number or predictors and noise while keeping 99% of the variance.
+```{r}
+variables <- -which(names(training.train) == "classe")
+pca.preProcess <- preProcess(training.train[, variables], method = "pca", thresh = 0.99)
+pca.train <- predict(pca.preProcess, training.train[, variables])
+pca.test <- predict(pca.preProcess, training.test[, variables])
+```
+
+We now have a smaller training data set with the most relevant factors:
+```{r}
+dim(training.data)
+```
+
+## Random Forest
+
+Train a random forest model, using a fixed sampling scheme (4-folds) which is much cheaper than the default boostraping method:
+```{r warning=FALSE, message=FALSE, cache=TRUE}
+control <- trainControl(allowParallel=TRUE, method = "cv", number = 4)
+model <- train(training.train$classe ~ ., method = "rf", data = pca.train, 
+               trControl = control, importance = TRUE)
+```
+
+###  Out-of Sample Error and Cross Validation
+
+```{r}
+model
+```
+
+Our model estimates an accuracy of 0.9713. The estimated out-of-sample error is 1 minus the model's accuracy, which gives us an estimated out-of-sample error or `r 1-0.9713`.
+
+
+Now, let's calculate our out of sample accuracy using our random forest model applied to our validation subset:
+```{r}
+prediction <- predict(model, newdata=pca.test)
+matrix = with(training.test,table(prediction,classe))
+accuracy <- sum(diag(matrix))/sum(as.vector(matrix))
+accuracy
+```
+
+We obtained `r accuracy*100`% accuracy which is very good. Our out-of-sample error rate is thus `r 1-accuracy`.
+
+
+# Answers Prediction 
+
+Finally apply our preprocessing and model to the test set: 
+```{r}
+testing.data <- testing.data[, -which(names(testing.data) %in% extracolumns)]
+testing.data <- subset(testing.data[, which(nacolumns == 0)])
+
+test.preprocess <-  predict(pca.preProcess, testing.data[, !names(training.train) %in% c("classe")])
+results <- predict(model, newdata=test.preprocess)
+results
+```
